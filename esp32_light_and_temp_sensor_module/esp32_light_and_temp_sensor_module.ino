@@ -1,9 +1,13 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <atomic>
+#include "DHT.h"
 #include "time.h"
 #include "esp_sntp.h"
 #include "parameters.h"
+
+#define DHTTYPE DHT22
+#define DHTPIN 4
 
 const int LightSensorPin = 32;
 const int LightSensorThreashold = 500;
@@ -16,6 +20,7 @@ unsigned long lightSensorChangedTime = 0;
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);  // MQTT
+DHT dht(DHTPIN, DHTTYPE);
 
 void checkLightSensorState() {
   lightSensorValue = analogRead(LightSensorPin);
@@ -57,6 +62,27 @@ void checkLightSensorState() {
     // Message for Home Assitant
     mqttClient.publish("garage/light/sensor", "OFF");
     lightSensorStateChanged = false;
+  }
+}
+
+void readHumidityAndTemperature() {
+  float h = dht.readHumidity();
+  float t = dht.readTemperature();
+
+  if (isnan(h) || isnan(t)) {
+    Serial.println("Failed to read from DHT sensor!");
+    return;
+  }
+
+  Serial.printf("Humidity: %.2f", h);
+  Serial.print("%\t");
+  Serial.printf("Temperature: %.2f°C\n", t);
+
+  if (mqttClient.connected()) {
+    mqttClient.publish("garage/dht22/temperature", String(t).c_str(), true);
+    mqttClient.publish("garage/dht22/humidity", String(h).c_str(), true);
+  } else {
+    Serial.println("Not connected to MQTT broker. Unable to publish humidity and temperature messages.");
   }
 }
 
@@ -153,6 +179,42 @@ void publishDiscoveryMqttMessage() {
   "}";
   Serial.println("Publishing Home Assistant Binary Sensor Discovery Message");
   mqttClient.publish("homeassistant/binary_sensor/garage_light_sensor/config", lightSensorDiscoveryMessage.c_str(), true); // true means the message is retained when HA is restarted
+
+  String humidityDiscoveryMessage = "{"
+    "\"name\": \"Garage Humidity\","
+    "\"unique_id\": \"garage_dht22_humidity\","
+    "\"state_topic\": \"garage/dht22/humidity\","
+    "\"unit_of_measurement\": \"%\","
+    "\"device_class\": \"humidity\","
+    "\"state_class\": \"measurement\","
+    "\"device\": {"
+      "\"identifiers\": [\"dht22_sensor_001\"],"
+      "\"name\": \"DHT22 Sensor\","
+      "\"model\": \"DHT22\","
+      "\"manufacturer\": \"Aosong\""
+    "},"
+    "\"icon\": \"mdi:water-percent\""
+  "}";
+  Serial.println("Publishing Home Assistant Humidity Sensor Discovery Message");
+  mqttClient.publish("homeassistant/sensor/garage_dht22_humidity/config", humidityDiscoveryMessage.c_str(), true); // true means the message is retained when HA is restarted
+
+    String temperatureDiscoveryMessage = "{"
+    "\"name\": \"Garage Temperature\","
+    "\"unique_id\": \"garage_dht22_temperature\","
+    "\"state_topic\": \"garage/dht22/temperature\","
+    "\"unit_of_measurement\": \"°C\","
+    "\"device_class\": \"temperature\","
+    "\"state_class\": \"measurement\","
+    "\"device\": {"
+      "\"identifiers\": [\"dht22_sensor_001\"],"
+      "\"name\": \"DHT22 Sensor\","
+      "\"model\": \"DHT22\","
+      "\"manufacturer\": \"Aosong\""
+    "},"
+    "\"icon\": \"mdi:home-thermometer\""
+  "}";
+  Serial.println("Publishing Home Assistant Temperature Sensor Discovery Message");
+  mqttClient.publish("homeassistant/sensor/garage_dht22_temperature/config", temperatureDiscoveryMessage.c_str(), true); // true means the message is retained when HA is restarted
 }
 
 void subscribeToMqttTopics() {
@@ -165,6 +227,7 @@ void subscribeToMqttTopics() {
 
 void setup() {
   Serial.begin(115200);
+  dht.begin();
 
   // First step is to configure WiFi STA and connect in order to get the current time and date.
   Serial.printf("Connecting to %s ", wifi_ssid);
@@ -226,6 +289,7 @@ void setup() {
 
 void loop() {
   static unsigned long lastCheckedLightState = 0;
+  static unsigned long lastReadDht = 0;
 
   // Reconnect both WiFi and MQTT if connection is broken
   ensureWifiConnected();
@@ -237,5 +301,11 @@ void loop() {
   if (millis() - lastCheckedLightState >= 100) {
     checkLightSensorState();
     lastCheckedLightState = millis();  // Reset timing
+  }
+
+  // Read humidity and temperature
+  if (millis() - lastReadDht >= 5000) {
+    readHumidityAndTemperature();
+    lastReadDht = millis();  // Reset timing
   }
 }
