@@ -1,5 +1,6 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <DHT.h>
 #include <atomic>
 #include "time.h"
 #include "esp_sntp.h"
@@ -13,6 +14,13 @@ int previousLightSensorValue = 0;
 char lightSensorState[4] = "off";
 std::atomic<bool> lightSensorStateChanged = false;
 unsigned long lightSensorChangedTime = 0;
+
+const int DhtPin = 4;
+const unsigned long DhtCheckInterval = 30000;  // DHT22 needs >=2s between reads; 30s is plenty for HA graphs
+DHT dht(DhtPin, DHT22);
+
+float temperatureValue = NAN;
+float humidityValue = NAN;
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);  // MQTT
@@ -58,6 +66,27 @@ void checkLightSensorState() {
     mqttClient.publish("garage/light/sensor", "OFF");
     lightSensorStateChanged = false;
   }
+}
+
+void checkTempHumidity() {
+  float newTemperature = dht.readTemperature();
+  float newHumidity = dht.readHumidity();
+
+  if (isnan(newTemperature) || isnan(newHumidity)) {
+    Serial.println("Failed to read from DHT22 sensor!");
+    return;
+  }
+
+  temperatureValue = newTemperature;
+  humidityValue = newHumidity;
+  Serial.printf("Temperature: %.1f C, Humidity: %.1f %%\n", temperatureValue, humidityValue);
+
+  char payload[8];
+  dtostrf(temperatureValue, 4, 1, payload);
+  mqttClient.publish("garage/temperature/sensor", payload);
+
+  dtostrf(humidityValue, 4, 1, payload);
+  mqttClient.publish("garage/humidity/sensor", payload);
 }
 
 void ensureMqttBrokerConnected() {
@@ -155,6 +184,34 @@ void publishDiscoveryMqttMessage() {
   mqttClient.publish("homeassistant/binary_sensor/garage_light_sensor/config", lightSensorDiscoveryMessage.c_str(), true); // true means the message is retained when HA is restarted
 }
 
+void publishTemperatureDiscoveryMqttMessage() {
+  String temperatureDiscoveryMessage = "{"
+    "\"name\": \"Garage Temperature\","
+    "\"unique_id\": \"garage_temperature_sensor\","
+    "\"state_topic\": \"garage/temperature/sensor\","
+    "\"unit_of_measurement\": \"°C\","
+    "\"device_class\": \"temperature\","
+    "\"state_class\": \"measurement\","
+    "\"icon\": \"mdi:thermometer\""
+  "}";
+  Serial.println("Publishing Home Assistant Temperature Sensor Discovery Message");
+  mqttClient.publish("homeassistant/sensor/garage_temperature_sensor/config", temperatureDiscoveryMessage.c_str(), true);
+}
+
+void publishHumidityDiscoveryMqttMessage() {
+  String humidityDiscoveryMessage = "{"
+    "\"name\": \"Garage Humidity\","
+    "\"unique_id\": \"garage_humidity_sensor\","
+    "\"state_topic\": \"garage/humidity/sensor\","
+    "\"unit_of_measurement\": \"%\","
+    "\"device_class\": \"humidity\","
+    "\"state_class\": \"measurement\","
+    "\"icon\": \"mdi:water-percent\""
+  "}";
+  Serial.println("Publishing Home Assistant Humidity Sensor Discovery Message");
+  mqttClient.publish("homeassistant/sensor/garage_humidity_sensor/config", humidityDiscoveryMessage.c_str(), true);
+}
+
 void subscribeToMqttTopics() {
   if (mqttClient.subscribe("garageLight/queryDeviceStatus")) {
     Serial.println("Subscribed to topic: garageLight/queryDeviceStatus");
@@ -165,6 +222,8 @@ void subscribeToMqttTopics() {
 
 void setup() {
   Serial.begin(115200);
+
+  dht.begin();
 
   // First step is to configure WiFi STA and connect in order to get the current time and date.
   Serial.printf("Connecting to %s ", wifi_ssid);
@@ -219,6 +278,8 @@ void setup() {
   if (mqttClient.connected()) {
     // Register this device as a sensor for the emergency stop button in Home Assistant
     publishDiscoveryMqttMessage();
+    publishTemperatureDiscoveryMqttMessage();
+    publishHumidityDiscoveryMqttMessage();
   } else {
     Serial.println("MQTT not connected - cannot publish discovery message");
   }
@@ -226,6 +287,7 @@ void setup() {
 
 void loop() {
   static unsigned long lastCheckedLightState = 0;
+  static unsigned long lastCheckedDht = 0;
 
   // Reconnect both WiFi and MQTT if connection is broken
   ensureWifiConnected();
@@ -237,5 +299,11 @@ void loop() {
   if (millis() - lastCheckedLightState >= 100) {
     checkLightSensorState();
     lastCheckedLightState = millis();  // Reset timing
+  }
+
+  // Handle temperature/humidity
+  if (millis() - lastCheckedDht >= DhtCheckInterval) {
+    checkTempHumidity();
+    lastCheckedDht = millis();  // Reset timing
   }
 }
