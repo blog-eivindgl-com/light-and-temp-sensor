@@ -265,6 +265,7 @@ void setup() {
   // Connect to MQTT broker
   mqttClient.setServer(mqttServer, 1883);
   mqttClient.setCallback(incomingMqttMessage);
+  mqttClient.setBufferSize(512);  // default 256 bytes is too small for the sensor discovery payloads
 
   // Connect to MQTT broker
   mqttClient.setServer(mqttServer, 1883);
