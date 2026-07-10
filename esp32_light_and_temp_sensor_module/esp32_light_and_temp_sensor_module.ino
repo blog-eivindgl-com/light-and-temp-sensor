@@ -6,6 +6,9 @@
 #include "esp_sntp.h"
 #include "parameters.h"
 
+const int LedPin = 2;
+unsigned long ledOnTime = 0;
+
 const int LightSensorPin = 32;
 const int LightSensorThreashold = 500;
 
@@ -58,6 +61,8 @@ void checkLightSensorState() {
     // Message for Home Assitant
     mqttClient.publish("garage/light/sensor", "ON");
     lightSensorStateChanged = false;
+    // Turn on LED to indicate message published
+    turnOnLed();
   } else if (lightSensorStateChanged && strcmp(lightSensorState, "off") == 0) {
     Serial.println("Light is off");
     // Message for ESP32 display module
@@ -65,6 +70,8 @@ void checkLightSensorState() {
     // Message for Home Assitant
     mqttClient.publish("garage/light/sensor", "OFF");
     lightSensorStateChanged = false;
+    // Turn on LED to indicate message published
+    turnOnLed();
   }
 }
 
@@ -87,6 +94,9 @@ void checkTempHumidity() {
 
   dtostrf(humidityValue, 4, 1, payload);
   mqttClient.publish("garage/humidity/sensor", payload);
+
+  // Turn on LED to indicate message published
+  turnOnLed();
 }
 
 void ensureMqttBrokerConnected() {
@@ -105,6 +115,16 @@ void ensureMqttBrokerConnected() {
       Serial.println();
     }
   }
+}
+
+void turnOnLed() {
+  // Turn the indicator LED on and record time to automatically turn it off again after a while
+  digitalWrite(LedPin, HIGH);
+  ledOnTime = millis();
+}
+
+void turnOffLed() {
+  digitalWrite(LedPin, LOW);
 }
 
 void ensureWifiConnected() {
@@ -223,6 +243,10 @@ void subscribeToMqttTopics() {
 void setup() {
   Serial.begin(115200);
 
+  // Turn on LED until setup is successfully executed
+  pinMode(LedPin, OUTPUT);
+  digitalWrite(LedPin, HIGH);
+  
   dht.begin();
 
   // First step is to configure WiFi STA and connect in order to get the current time and date.
@@ -284,11 +308,18 @@ void setup() {
   } else {
     Serial.println("MQTT not connected - cannot publish discovery message");
   }
+
+  // Turn off LED to indicate setup completed
+  digitalWrite(LedPin, LOW);
 }
 
 void loop() {
   static unsigned long lastCheckedLightState = 0;
   static unsigned long lastCheckedDht = 0;
+
+  if (millis() - ledOnTime >= 1000) {
+    turnOffLed();
+  }
 
   // Reconnect both WiFi and MQTT if connection is broken
   ensureWifiConnected();
