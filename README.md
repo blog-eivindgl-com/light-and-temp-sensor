@@ -74,4 +74,4 @@ Feel free to mount this in a much simpler way. I just like Multibuild's flexibil
 Use fire resistant filament when 3D printing housing for electronics. Picture of the complete box mounted to a Multibuild tile:
 ![Completed box](images/completed_box.png)
 
-Step files for the box and lid are provided in the 3d_model folder together with the Fusion360 f3d file, which should give you several options to modify the model to your needs. There's also a 3mf file for the slicer program.
+Step files for the box and lid are provided in the 3d_model folder together with the Fusion360 f3d file, which should give you several options to modify the model to your needs. There's also a 3mf file for the slicer program. The 3D model files are also shared on [Printables](https://www.printables.com/model/1785509-esp32-light-and-temperaturehumidity-project-for-ho).
